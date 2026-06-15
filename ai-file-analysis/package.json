@@ -1,0 +1,15 @@
+{
+  "name": "ai-file-analysis",
+  "version": "1.0.0",
+  "description": "AI-powered file and image analysis integration for WMT",
+  "dependencies": {
+    "openai": "^4.28.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "@supabase/ssr": "^0.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "typescript": "^5.0.0"
+  }
+}
