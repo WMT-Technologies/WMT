@@ -5,12 +5,12 @@ import {
   saveAnalysisToWMT,
 } from '../lib/supabase-client';
 import {
-  validateUserPermission,
+  hasPermission,
   logAnalysisAction,
-  getUserRole,
   canHandleDocumentType,
 } from '../lib/permissions';
-import { SaveAnalysisResponse, ApiError } from '../types/analysis';
+import { requireAuth, AccessError, type AuthContext } from '../lib/auth';
+import type { SaveAnalysisResponse, ApiError } from '../types/analysis';
 
 export default async function handler(
   req: NextApiRequest,
@@ -20,12 +20,11 @@ export default async function handler(
     return res.status(405).json({ error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' });
   }
 
-  const userId = req.headers['x-user-id'] as string;
-  if (!userId) {
-    return res.status(401).json({ error: 'Missing user ID', code: 'MISSING_USER_ID' });
-  }
+  let context: AuthContext | undefined;
 
   try {
+    context = await requireAuth(req);
+    const { userId, workspaceId, role: userRole } = context;
     const { analysisId, approvedData, notes } = req.body;
 
     if (!analysisId || !approvedData) {
@@ -35,7 +34,7 @@ export default async function handler(
       });
     }
 
-    const analysis = await getAnalysisResult(analysisId);
+    const analysis = await getAnalysisResult(analysisId, context);
     if (!analysis) {
       return res.status(404).json({
         error: 'Analysis not found',
@@ -43,14 +42,12 @@ export default async function handler(
       });
     }
 
-    if (analysis.user_id !== userId) {
+    if (analysis.user_id !== userId || analysis.workspace_id !== workspaceId) {
       return res.status(403).json({
         error: 'Not authorized to save this analysis',
         code: 'NOT_AUTHORIZED',
       });
     }
-
-    const userRole = await getUserRole(userId);
 
     if (!canHandleDocumentType(userRole, analysis.detected_type)) {
       return res.status(403).json({
@@ -59,10 +56,9 @@ export default async function handler(
       });
     }
 
-    const permissionCheck = await validateUserPermission(userId, analysis.suggested_action);
-    if (!permissionCheck.allowed) {
+    if (!hasPermission(userRole, analysis.suggested_action)) {
       return res.status(403).json({
-        error: permissionCheck.reason || 'Insufficient permissions',
+        error: 'Insufficient permissions',
         code: 'INSUFFICIENT_PERMISSIONS',
       });
     }
@@ -71,7 +67,7 @@ export default async function handler(
     try {
       const result = await saveAnalysisToWMT(
         analysisId,
-        userId,
+        context,
         analysis.suggested_action,
         approvedData
       );
@@ -80,9 +76,10 @@ export default async function handler(
       console.error('Error saving to WMT:', wmtError);
     }
 
-    await updateAnalysisStatus(analysisId, 'saved');
+    await updateAnalysisStatus(analysisId, 'saved', context);
 
     await logAnalysisAction(userId, 'analysis_saved', analysisId, {
+      workspaceId,
       documentType: analysis.detected_type,
       suggestedAction: analysis.suggested_action,
       userRole,
@@ -99,13 +96,19 @@ export default async function handler(
 
     res.status(200).json(response);
   } catch (error) {
+    if (error instanceof AccessError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     console.error('Save analysis error:', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    await logAnalysisAction(userId, 'analysis_save_failed', req.body.analysisId, {
-      error: errorMessage,
-    }).catch(err => console.error('Failed to log error:', err));
+    if (context) {
+      await logAnalysisAction(context.userId, 'analysis_save_failed', req.body?.analysisId, {
+        workspaceId: context.workspaceId,
+        error: errorMessage,
+      }).catch(err => console.error('Failed to log error:', err));
+    }
 
     res.status(500).json({
       error: 'Failed to save analysis',

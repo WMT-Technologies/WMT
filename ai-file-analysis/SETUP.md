@@ -25,29 +25,12 @@ npm install @supabase/supabase-js @supabase/ssr openai
 
 ### Create Database Table
 
-Go to **SQL Editor** and run:
+Apply `database/schema.sql` as a trusted database owner. It is the single source
+for fresh installations and existing-table upgrades, including private storage,
+server-only access, and workspace isolation. Do not use a table-only setup.
 
-```sql
-CREATE TABLE ai_analysis_results (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  detected_type TEXT NOT NULL,
-  confidence NUMERIC NOT NULL,
-  extracted_data JSONB NOT NULL,
-  suggested_action TEXT NOT NULL,
-  file_url TEXT NOT NULL,
-  file_storage_path TEXT NOT NULL,
-  ai_provider TEXT NOT NULL,
-  status TEXT DEFAULT 'pending',
-  wmt_record_id TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_id ON ai_analysis_results(user_id);
-CREATE INDEX idx_status ON ai_analysis_results(status);
-CREATE INDEX idx_created_at ON ai_analysis_results(created_at);
-```
+Before enabling the module, complete [AUTH_INTEGRATION.md](AUTH_INTEGRATION.md).
+There is no default company, automatic approval, or default role.
 
 ## Step 3: Get API Keys
 

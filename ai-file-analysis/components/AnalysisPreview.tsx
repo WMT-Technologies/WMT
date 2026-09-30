@@ -5,14 +5,16 @@ import { AnalysisResult, ExtractedData, SaveAnalysisResponse, ApiError } from '.
 
 interface AnalysisPreviewProps {
   analysis: AnalysisResult;
-  userId: string;
+  workspaceId: string;
+  getAccessToken: () => Promise<string | null>;
   onSave?: (response: SaveAnalysisResponse) => void;
   onCancel?: () => void;
 }
 
 export default function AnalysisPreview({
   analysis,
-  userId,
+  workspaceId,
+  getAccessToken,
   onSave,
   onCancel,
 }: AnalysisPreviewProps) {
@@ -34,11 +36,14 @@ export default function AnalysisPreview({
     setError(null);
 
     try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) throw new Error('Please sign in before continuing');
       const response = await fetch('/api/save-analysis', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': userId,
+          Authorization: `Bearer ${accessToken}`,
+          'x-workspace-id': workspaceId,
         },
         body: JSON.stringify({
           analysisId: analysis.id,

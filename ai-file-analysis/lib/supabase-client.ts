@@ -1,30 +1,26 @@
+import { randomUUID } from 'node:crypto';
+import { assertOwnedPath, type AuthContext } from './auth';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase environment variables not configured');
-}
-
-// Client for browser/public operations
-export const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
-
-// Server-side client with service role (use only on backend)
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+// Server-only module. Browser components must never import this file.
+if (typeof window !== 'undefined') throw new Error('Server-only storage module');
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 
 /**
  * Upload file to Supabase Storage
  */
 export async function uploadFile(
   file: File,
-  userId: string,
+  context: AuthContext,
   bucket: string = 'ai-analysis-uploads'
-): Promise<{ path: string; url: string }> {
+): Promise<{ path: string }> {
   try {
-    const timestamp = Date.now();
-    const filename = `${userId}/${timestamp}-${file.name}`;
+    const filename = `${context.workspaceId}/${context.userId}/${randomUUID()}`;
 
     const { data, error } = await supabaseAdmin.storage
       .from(bucket)
@@ -37,18 +33,21 @@ export async function uploadFile(
       throw new Error(`Upload failed: ${error.message}`);
     }
 
-    const { data: publicData } = supabaseAdmin.storage
-      .from(bucket)
-      .getPublicUrl(filename);
-
-    return {
-      path: data.path,
-      url: publicData.publicUrl,
-    };
+    return { path: data.path };
   } catch (error) {
     console.error('Error uploading file:', error);
     throw error;
   }
+}
+
+/** Generate a short-lived preview only after route authorization has succeeded. */
+export async function getFilePreviewUrl(filePath: string, context: AuthContext): Promise<string> {
+  assertOwnedPath(context, filePath);
+  const { data, error } = await supabaseAdmin.storage
+    .from('ai-analysis-uploads')
+    .createSignedUrl(filePath, 60);
+  if (error) throw new Error('Unable to create private file preview');
+  return data.signedUrl;
 }
 
 /**
@@ -56,9 +55,11 @@ export async function uploadFile(
  */
 export async function deleteFile(
   filePath: string,
+  context: AuthContext,
   bucket: string = 'ai-analysis-uploads'
 ): Promise<void> {
   try {
+    assertOwnedPath(context, filePath);
     const { error } = await supabaseAdmin.storage
       .from(bucket)
       .remove([filePath]);
@@ -76,28 +77,29 @@ export async function deleteFile(
  * Store analysis result in database
  */
 export async function storeAnalysisResult(
+  context: AuthContext,
   analysisData: {
-    userId: string;
     detectedType: string;
     confidence: number;
     extractedData: Record<string, any>;
     suggestedAction: string;
-    fileUrl: string;
     fileStoragePath: string;
     aiProvider: string;
   }
 ): Promise<{ id: string }> {
   try {
+    assertOwnedPath(context, analysisData.fileStoragePath);
     const { data, error } = await supabaseAdmin
       .from('ai_analysis_results')
       .insert([
         {
-          user_id: analysisData.userId,
+          user_id: context.userId,
+          workspace_id: context.workspaceId,
           detected_type: analysisData.detectedType,
           confidence: analysisData.confidence,
           extracted_data: analysisData.extractedData,
           suggested_action: analysisData.suggestedAction,
-          file_url: analysisData.fileUrl,
+          file_url: '', // Signed preview URLs are ephemeral and must not be persisted.
           file_storage_path: analysisData.fileStoragePath,
           ai_provider: analysisData.aiProvider,
           status: 'pending',
@@ -121,13 +123,15 @@ export async function storeAnalysisResult(
 /**
  * Get analysis result from database
  */
-export async function getAnalysisResult(analysisId: string) {
+export async function getAnalysisResult(analysisId: string, context: AuthContext) {
   try {
     const { data, error } = await supabaseAdmin
       .from('ai_analysis_results')
       .select('*')
       .eq('id', analysisId)
-      .single();
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.userId)
+      .maybeSingle();
 
     if (error) {
       throw new Error(`Database query failed: ${error.message}`);
@@ -145,7 +149,8 @@ export async function getAnalysisResult(analysisId: string) {
  */
 export async function updateAnalysisStatus(
   analysisId: string,
-  status: 'pending' | 'approved' | 'rejected' | 'saved'
+  status: 'pending' | 'approved' | 'rejected' | 'saved',
+  context: AuthContext
 ): Promise<void> {
   try {
     const { error } = await supabaseAdmin
@@ -154,7 +159,9 @@ export async function updateAnalysisStatus(
         status,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', analysisId);
+      .eq('id', analysisId)
+      .eq('workspace_id', context.workspaceId)
+      .eq('user_id', context.userId);
 
     if (error) {
       throw new Error(`Status update failed: ${error.message}`);
@@ -170,7 +177,7 @@ export async function updateAnalysisStatus(
  */
 export async function saveAnalysisToWMT(
   analysisId: string,
-  userId: string,
+  context: AuthContext,
   suggestedAction: string,
   approvedData: Record<string, any>
 ): Promise<{ recordId: string }> {
@@ -185,7 +192,8 @@ export async function saveAnalysisToWMT(
         },
         body: JSON.stringify({
           analysisId,
-          userId,
+          userId: context.userId,
+          workspaceId: context.workspaceId,
           action: suggestedAction,
           data: approvedData,
         }),

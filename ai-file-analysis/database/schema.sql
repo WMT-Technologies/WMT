@@ -1,1 +1,72 @@
--- AI Analysis Results Table\nCREATE TABLE IF NOT EXISTS ai_analysis_results (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  detected_type TEXT NOT NULL,\n  confidence NUMERIC NOT NULL,\n  extracted_data JSONB NOT NULL,\n  suggested_action TEXT NOT NULL,\n  file_url TEXT NOT NULL,\n  file_storage_path TEXT NOT NULL,\n  ai_provider TEXT NOT NULL,\n  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'saved')),\n  wmt_record_id TEXT,\n  notes TEXT,\n  created_at TIMESTAMP DEFAULT NOW(),\n  updated_at TIMESTAMP DEFAULT NOW()\n);\n\n-- Create indexes for better query performance\nCREATE INDEX IF NOT EXISTS idx_user_id ON ai_analysis_results(user_id);\nCREATE INDEX IF NOT EXISTS idx_status ON ai_analysis_results(status);\nCREATE INDEX IF NOT EXISTS idx_created_at ON ai_analysis_results(created_at);\nCREATE INDEX IF NOT EXISTS idx_detected_type ON ai_analysis_results(detected_type);\nCREATE INDEX IF NOT EXISTS idx_user_status ON ai_analysis_results(user_id, status);\n\n-- Enable Row Level Security (RLS)\nALTER TABLE ai_analysis_results ENABLE ROW LEVEL SECURITY;\n\n-- RLS Policy: Users can view their own analyses\nCREATE POLICY \"Users can view their own analyses\"\n  ON ai_analysis_results\n  FOR SELECT\n  USING (auth.uid()::text = user_id OR auth.role() = 'service_role');\n\n-- RLS Policy: Users can insert their own analyses\nCREATE POLICY \"Users can insert their own analyses\"\n  ON ai_analysis_results\n  FOR INSERT\n  WITH CHECK (auth.uid()::text = user_id);\n\n-- RLS Policy: Users can update their own pending analyses\nCREATE POLICY \"Users can update their own pending analyses\"\n  ON ai_analysis_results\n  FOR UPDATE\n  USING (auth.uid()::text = user_id AND status = 'pending')\n  WITH CHECK (auth.uid()::text = user_id);\n\n-- Storage: Create bucket for file uploads\nINSERT INTO storage.buckets (id, name, public) \nVALUES ('ai-analysis-uploads', 'ai-analysis-uploads', false)\nON CONFLICT (id) DO NOTHING;\n\n-- Storage RLS: Users can upload files\nCREATE POLICY \"Users can upload files\"\n  ON storage.objects\n  FOR INSERT\n  WITH CHECK (bucket_id = 'ai-analysis-uploads');\n\n-- Storage RLS: Users can read their own files\nCREATE POLICY \"Users can read their own files\"\n  ON storage.objects\n  FOR SELECT\n  USING (bucket_id = 'ai-analysis-uploads' AND auth.uid()::text = owner);\n\n-- Storage RLS: Service role has full access\nCREATE POLICY \"Service role has full storage access\"\n  ON storage.objects\n  USING (auth.role() = 'service_role');\n\n-- Audit Log Table (optional but recommended)\nCREATE TABLE IF NOT EXISTS ai_analysis_audit (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  user_id TEXT NOT NULL,\n  action TEXT NOT NULL,\n  analysis_id UUID,\n  document_type TEXT,\n  status TEXT,\n  error_message TEXT,\n  metadata JSONB,\n  created_at TIMESTAMP DEFAULT NOW()\n);\n\nCREATE INDEX IF NOT EXISTS idx_audit_user ON ai_analysis_audit(user_id);\nCREATE INDEX IF NOT EXISTS idx_audit_action ON ai_analysis_audit(action);\nCREATE INDEX IF NOT EXISTS idx_audit_created ON ai_analysis_audit(created_at);\n\n-- Enable RLS for audit table\nALTER TABLE ai_analysis_audit ENABLE ROW LEVEL SECURITY;\n\n-- Audit log visibility: Service role only\nCREATE POLICY \"Service role can view audit logs\"\n  ON ai_analysis_audit\n  USING (auth.role() = 'service_role');\n"
+-- Module schema and upgrade script. Apply with a trusted database owner.
+-- This module intentionally exposes data ONLY through its authenticated server APIs.
+BEGIN;
+CREATE TABLE IF NOT EXISTS public.ai_analysis_results (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  detected_type TEXT NOT NULL,
+  confidence NUMERIC NOT NULL,
+  extracted_data JSONB NOT NULL,
+  suggested_action TEXT NOT NULL,
+  file_url TEXT NOT NULL DEFAULT '',
+  file_storage_path TEXT NOT NULL,
+  ai_provider TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'saved')),
+  wmt_record_id TEXT,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+-- Existing rows remain NULL and inaccessible until ownership is independently verified.
+-- Never guess a default workspace or backfill all rows into one company.
+ALTER TABLE public.ai_analysis_results ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE public.ai_analysis_results ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.ai_analysis_results DROP CONSTRAINT IF EXISTS ai_analysis_workspace_required;
+ALTER TABLE public.ai_analysis_results ADD CONSTRAINT ai_analysis_workspace_required
+  CHECK (workspace_id IS NOT NULL AND workspace_id ~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$') NOT VALID;
+CREATE INDEX IF NOT EXISTS idx_analysis_workspace_user
+  ON public.ai_analysis_results(workspace_id, user_id, id);
+ALTER TABLE public.ai_analysis_results ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.ai_analysis_results FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ai_analysis_results TO service_role;
+-- Remove the old user-only policies (no company isolation and stale JWT approval).
+DROP POLICY IF EXISTS "Users can view their own analyses" ON public.ai_analysis_results;
+DROP POLICY IF EXISTS "Users can insert their own analyses" ON public.ai_analysis_results;
+DROP POLICY IF EXISTS "Users can update their own pending analyses" ON public.ai_analysis_results;
+-- Defense in depth even if table privileges are granted again later.
+DROP POLICY IF EXISTS "Analysis server access only" ON public.ai_analysis_results;
+CREATE POLICY "Analysis server access only" ON public.ai_analysis_results
+  AS RESTRICTIVE FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('ai-analysis-uploads', 'ai-analysis-uploads', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+DROP POLICY IF EXISTS "Users can upload files" ON storage.objects;
+DROP POLICY IF EXISTS "Users can read their own files" ON storage.objects;
+DROP POLICY IF EXISTS "Service role has full storage access" ON storage.objects;
+-- Block direct Storage calls for THIS bucket, including via stale access tokens.
+-- Other buckets retain their existing access policies.
+DROP POLICY IF EXISTS "AI analysis storage server access only" ON storage.objects;
+CREATE POLICY "AI analysis storage server access only" ON storage.objects
+  AS RESTRICTIVE FOR ALL TO anon, authenticated
+  USING (bucket_id <> 'ai-analysis-uploads')
+  WITH CHECK (bucket_id <> 'ai-analysis-uploads');
+
+CREATE TABLE IF NOT EXISTS public.ai_analysis_audit (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  workspace_id TEXT,
+  action TEXT NOT NULL,
+  analysis_id UUID,
+  document_type TEXT,
+  status TEXT,
+  error_message TEXT,
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+ALTER TABLE public.ai_analysis_audit ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE public.ai_analysis_audit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.ai_analysis_audit FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON public.ai_analysis_audit TO service_role;
+COMMIT;

@@ -2,6 +2,7 @@
 
 export interface AnalysisRequest {
   userId: string;
+  workspaceId: string;
   file: File;
   documentType?: string;
 }
@@ -26,6 +27,7 @@ export interface AnalysisResult {
 export interface AnalysisMetadata {
   uploadedAt: string;
   userId: string;
+  workspaceId: string;
   analysisTime: number;
   aiProvider: 'openai_vision' | 'google_document_ai' | 'hybrid';
   fileSize: number;
@@ -57,6 +59,7 @@ export type SuggestedAction =
 export interface SaveAnalysisRequest {
   analysisId: string;
   userId: string;
+  workspaceId: string;
   approvedData: ExtractedData;
   notes?: string;
 }
@@ -78,6 +81,7 @@ export type UserRole = 'SALES' | 'HR' | 'FINANCE' | 'PROJECT' | 'ADMIN';
 
 export interface UserPermissions {
   userId: string;
+  workspaceId: string;
   role: UserRole;
   permissions: SuggestedAction[];
 }

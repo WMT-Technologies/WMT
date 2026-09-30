@@ -1,5 +1,7 @@
 # AI File & Image Analysis Integration
 
+**Required security integration:** read [AUTH_INTEGRATION.md](AUTH_INTEGRATION.md) before enabling this module. Requests require a verified Supabase session and an approved workspace membership; `x-user-id` is not accepted as authentication.
+
 Simple implementation for file/image analysis using OpenAI Vision API and Supabase without building OCR/recognition from scratch.
 
 ## Features

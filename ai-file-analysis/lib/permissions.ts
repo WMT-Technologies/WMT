@@ -1,4 +1,4 @@
-import { UserRole, SuggestedAction } from '../types/analysis';
+import type { UserRole, SuggestedAction } from '../types/analysis';
 
 // Role-to-Permissions mapping
 const rolePermissions: Record<UserRole, SuggestedAction[]> = {
@@ -47,57 +47,6 @@ export function hasPermission(
  */
 export function getUserPermissions(userRole: UserRole): SuggestedAction[] {
   return rolePermissions[userRole] || [];
-}
-
-/**
- * Get user role from WMT database or JWT token
- */
-export async function getUserRole(userId: string): Promise<UserRole> {
-  try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_WMT_API_URL}/users/${userId}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.WMT_API_KEY}`,
-      },
-    });
-
-    if (!response.ok) {
-      console.warn(`Failed to fetch user role for ${userId}`);
-      return 'SALES';
-    }
-
-    const user = await response.json();
-    return user.role || 'SALES';
-  } catch (error) {
-    console.error('Error fetching user role:', error);
-    return 'SALES';
-  }
-}
-
-/**
- * Validate user can perform action based on their role
- */
-export async function validateUserPermission(
-  userId: string,
-  action: SuggestedAction
-): Promise<{ allowed: boolean; reason?: string }> {
-  try {
-    const userRole = await getUserRole(userId);
-
-    if (!hasPermission(userRole, action)) {
-      return {
-        allowed: false,
-        reason: `User role '${userRole}' does not have permission for action '${action}'`,
-      };
-    }
-
-    return { allowed: true };
-  } catch (error) {
-    console.error('Error validating permission:', error);
-    return {
-      allowed: false,
-      reason: 'Error validating permissions',
-    };
-  }
 }
 
 /**

@@ -5,13 +5,15 @@ import { AnalysisResult, ApiError } from '../types/analysis';
 
 interface FileUploadProps {
   onAnalysisComplete?: (result: AnalysisResult) => void;
-  userId: string;
+  workspaceId: string;
+  getAccessToken: () => Promise<string | null>;
   acceptedFormats?: string;
 }
 
 export default function FileUpload({
   onAnalysisComplete,
-  userId,
+  workspaceId,
+  getAccessToken,
   acceptedFormats = '.pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif',
 }: FileUploadProps) {
   const [file, setFile] = useState<File | null>(null);
@@ -64,6 +66,8 @@ export default function FileUpload({
     setProgress(0);
 
     try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) throw new Error('Please sign in before continuing');
       const formData = new FormData();
       formData.append('file', file);
 
@@ -100,7 +104,8 @@ export default function FileUpload({
       });
 
       xhr.open('POST', '/api/analyze');
-      xhr.setRequestHeader('x-user-id', userId);
+      xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+      xhr.setRequestHeader('x-workspace-id', workspaceId);
       xhr.send(formData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
