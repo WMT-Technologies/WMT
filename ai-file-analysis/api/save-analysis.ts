@@ -63,18 +63,13 @@ export default async function handler(
       });
     }
 
-    let recordId: string | undefined;
-    try {
-      const result = await saveAnalysisToWMT(
-        analysisId,
-        context,
-        analysis.suggested_action,
-        approvedData
-      );
-      recordId = result.recordId;
-    } catch (wmtError) {
-      console.error('Error saving to WMT:', wmtError);
-    }
+    const result = await saveAnalysisToWMT(
+      analysisId,
+      context,
+      analysis.suggested_action,
+      approvedData
+    );
+    const recordId = result.recordId;
 
     await updateAnalysisStatus(analysisId, 'saved', context);
 
