@@ -14,7 +14,7 @@ export default function FileUpload({
   onAnalysisComplete,
   workspaceId,
   getAccessToken,
-  acceptedFormats = '.pdf,.doc,.docx,.xlsx,.jpg,.jpeg,.png,.gif',
+  acceptedFormats = '.pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.gif,.webp',
 }: FileUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -184,8 +184,8 @@ export default function FileUpload({
       <div className="mt-6 p-4 bg-gray-50 rounded">
         <h3 className="font-semibold text-sm mb-2">Supported Formats:</h3>
         <ul className="text-xs text-gray-600 space-y-1">
-          <li>✓ Images: JPG, PNG, GIF</li>
-          <li>✓ Documents: PDF, Word, Excel</li>
+          <li>✓ Images: JPG, PNG, GIF, WEBP</li>
+          <li>✓ Documents: PDF, Word, Excel, CSV</li>
           <li>✓ Max file size: 20MB</li>
         </ul>
       </div>
