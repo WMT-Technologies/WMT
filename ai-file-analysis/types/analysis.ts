@@ -8,7 +8,7 @@ export interface AnalysisRequest {
 }
 
 export interface ExtractedData {
-  [key: string]: string | number | boolean | null;
+  [key: string]: string | number | boolean | null | unknown[] | Record<string, unknown>;
 }
 
 export interface AnalysisResult {
@@ -29,7 +29,7 @@ export interface AnalysisMetadata {
   userId: string;
   workspaceId: string;
   analysisTime: number;
-  aiProvider: 'openai_vision' | 'google_document_ai' | 'hybrid';
+  aiProvider: 'openai_responses' | 'google_document_ai' | 'hybrid';
   fileSize: number;
   fileMimeType: string;
 }
