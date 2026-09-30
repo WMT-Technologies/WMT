@@ -2,8 +2,12 @@
   "name": "ai-file-analysis",
   "version": "1.0.0",
   "description": "AI-powered file and image analysis integration for WMT",
+  "scripts": {
+    "test:security": "node --experimental-vm-modules --test tests/security.test.mjs",
+    "test:openai": "node --experimental-vm-modules --test tests/openai.test.mjs"
+  },
   "dependencies": {
-    "openai": "^4.28.0",
+    "openai": "^7.17.0",
     "@supabase/supabase-js": "^2.38.0",
     "@supabase/ssr": "^0.0.10"
   },
