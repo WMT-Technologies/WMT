@@ -33,7 +33,7 @@ jobs:
         run: npm install --no-save --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14
 
       - name: Type-check OpenAI integration against installed SDK
-        run: npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck lib/openai-vision.ts types/analysis.ts
+        run: npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck lib/openai-vision.ts config/document-types.ts config/wmt-integration.ts types/analysis.ts
 
       - name: Run OpenAI request tests
         run: node --experimental-vm-modules --test tests/openai.test.mjs
