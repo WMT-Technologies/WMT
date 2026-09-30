@@ -318,4 +318,3 @@ export function validateExtractedData(
     errors,
   };
 }
-"
