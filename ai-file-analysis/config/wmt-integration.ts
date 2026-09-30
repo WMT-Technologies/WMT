@@ -273,4 +273,3 @@ export async function validateWMTPermission(
     return false;
   }
 }
-"
