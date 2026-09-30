@@ -9,7 +9,8 @@
   "dependencies": {
     "openai": "^7.17.0",
     "@supabase/supabase-js": "^2.38.0",
-    "@supabase/ssr": "^0.0.10"
+    "@supabase/ssr": "^0.0.10",
+    "formidable": "^3.5.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
