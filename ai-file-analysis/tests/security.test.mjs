@@ -26,7 +26,7 @@ function response() {
 
 async function harness() {
   const state = { user: approvedUser(), authStatus: 200, authFailure: false, authCalls: 0,
-    rows: [], queries: [], uploads: [], signed: [], removed: [], backend: [], aiCalls: 0,
+    rows: [], queries: [], uploads: [], signed: [], removed: [], backend: [], backendStatus: 200, aiCalls: 0,
     aiResult: { type: 'invoice', confidence: 0.95, data: { amount: 100 }, action: 'create_invoice' } };
   const db = {
     from(table) {
@@ -71,7 +71,7 @@ async function harness() {
       }
       assert.equal(url, 'https://wmt.example/ai-analysis/save');
       state.backend.push(JSON.parse(options.body));
-      return new Response(JSON.stringify({ id: 'saved-record' }), { status: 200 });
+      return new Response(JSON.stringify(state.backendStatus === 200 ? { id: 'saved-record' } : { error: 'backend failed' }), { status: state.backendStatus, statusText: state.backendStatus === 200 ? 'OK' : 'Bad Gateway' });
     },
   });
   const cache = new Map();
@@ -250,4 +250,30 @@ test('image PDF and Excel complete analyze then save integration flow', async ()
     assert.equal(h.state.backend[0].workspaceId, 'company-a');
     assert.equal(h.state.backend[0].userId, uid);
   }
+});
+
+
+test('failed WMT save returns an error and leaves analysis pending', async () => {
+  const h = await harness();
+  h.state.backendStatus = 502;
+  const route = await h.exports('api/save-analysis.ts');
+  h.state.rows.push({
+    id: 'pending-save',
+    user_id: uid,
+    workspace_id: 'company-a',
+    detected_type: 'invoice',
+    suggested_action: 'create_invoice',
+    status: 'pending',
+  });
+
+  const res = response();
+  await route.default(request({}, {
+    analysisId: 'pending-save',
+    approvedData: { amount: 100 },
+  }), res);
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.success, undefined);
+  assert.equal(h.state.rows[0].status, 'pending');
+  assert.equal(h.state.backend.length, 1);
 });
