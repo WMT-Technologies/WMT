@@ -1,0 +1,45 @@
+name: AI File Analysis Tests
+
+on:
+  push:
+    branches:
+      - feature/ai-file-analysis
+  pull_request:
+    paths:
+      - 'ai-file-analysis/**'
+      - '.github/workflows/ai-file-analysis-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-file-analysis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ai-file-analysis/package.json
+
+      - name: Install module dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Install isolated schema test dependency
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14
+
+      - name: Type-check OpenAI integration against installed SDK
+        run: npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck lib/openai-vision.ts config/document-types.ts config/wmt-integration.ts types/analysis.ts
+
+      - name: Run OpenAI request tests
+        run: node --experimental-vm-modules --test tests/openai.test.mjs
+
+      - name: Run security and format integration tests
+        run: node --experimental-vm-modules --test tests/security.test.mjs
+
+      - name: Run schema isolation test
+        run: node --test tests/schema.test.mjs

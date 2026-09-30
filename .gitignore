@@ -1,2 +1,10 @@
 # Google App Engine generated folder
 appengine-generated/
+
+# Local environment files and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
