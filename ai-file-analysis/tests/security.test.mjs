@@ -89,7 +89,7 @@ async function harness() {
     await mod.link(async (specifier, parent) => {
       if (specifier === '@supabase/supabase-js') return synthetic('supabase', { createClient: () => db });
       if (specifier === 'node:crypto') return synthetic('crypto', { randomUUID });
-      if (specifier.endsWith('/openai-vision')) return synthetic('ai', { analyzeWithRetry: async () => { state.aiCalls++; return state.aiResult; } });
+      if (specifier.endsWith('/openai-vision')) return synthetic('ai', { analyzeWithRetry: async () => { state.aiCalls++; return state.aiResult; }, isSupportedAnalysisMimeType: (mime) => ['image/png','image/jpeg','image/gif','image/webp','application/pdf','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv','application/csv','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mime) });
       return load(resolve(dirname(parent.identifier), specifier + '.ts'));
     });
     return mod;
@@ -214,4 +214,40 @@ test('preview URL generation rejects another company before accessing Storage', 
   const h = await harness(); const repo = await h.exports('lib/supabase-client.ts');
   await assert.rejects(repo.getFilePreviewUrl(`company-b/${uid}/file`, contextA), e => e.status === 403);
   assert.equal(h.state.signed.length, 0);
+});
+
+
+test('image PDF and Excel complete analyze then save integration flow', async () => {
+  for (const [name, mimetype] of [
+    ['receipt.png', 'image/png'],
+    ['invoice.pdf', 'application/pdf'],
+    ['fleet.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ]) {
+    const h = await harness();
+    const analyzeRoute = await h.exports('api/analyze.ts');
+    const saveRoute = await h.exports('api/save-analysis.ts');
+
+    const req = request();
+    req.files = { file: { name, size: 128, mimetype, data: Buffer.from(`fixture-${name}`) } };
+    const analyzeRes = response();
+    await analyzeRoute.default(req, analyzeRes);
+
+    assert.equal(analyzeRes.statusCode, 200, `${name} analyze failed`);
+    assert.equal(analyzeRes.body.analysisMetadata.fileMimeType, mimetype);
+    assert.equal(h.state.aiCalls, 1);
+    assert.equal(h.state.uploads.length, 1);
+    assert.ok(Buffer.isBuffer(h.state.uploads[0].file));
+
+    const saveRes = response();
+    await saveRoute.default(request({}, {
+      analysisId: analyzeRes.body.id,
+      approvedData: analyzeRes.body.extractedData,
+    }), saveRes);
+
+    assert.equal(saveRes.statusCode, 200, `${name} save failed`);
+    assert.equal(saveRes.body.success, true);
+    assert.equal(h.state.backend.length, 1);
+    assert.equal(h.state.backend[0].workspaceId, 'company-a');
+    assert.equal(h.state.backend[0].userId, uid);
+  }
 });
