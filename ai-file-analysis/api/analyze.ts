@@ -1,4 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { readFile } from 'node:fs/promises';
+import formidable from 'formidable';
 import { analyzeWithRetry, isSupportedAnalysisMimeType } from '../lib/openai-vision';
 import {
   uploadFile,
@@ -11,6 +13,16 @@ import { requireAuth, AccessError, type AuthContext } from '../lib/auth';
 import type { AnalysisResult, ApiError } from '../types/analysis';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+class FileInputError extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -57,6 +69,64 @@ function normalizeFile(file: any): {
   };
 }
 
+async function readIncomingFile(req: NextApiRequest): Promise<{
+  data: Buffer;
+  size: number;
+  mimetype: string;
+  name: string;
+}> {
+  // Preserve compatibility with a host that already parsed multipart.
+  const preParsedFiles = (req as any).files;
+  const preParsed = Array.isArray(preParsedFiles?.file)
+    ? preParsedFiles.file[0]
+    : preParsedFiles?.file;
+  if (preParsed) return normalizeFile(preParsed);
+
+  if (!String(req.headers['content-type'] || '').toLowerCase().includes('multipart/form-data')) {
+    throw new FileInputError(400, 'INVALID_UPLOAD', 'Expected multipart/form-data upload');
+  }
+
+  const form = formidable({
+    multiples: false,
+    maxFiles: 1,
+    maxFileSize: MAX_FILE_SIZE,
+    maxFields: 5,
+    maxFieldsSize: 16 * 1024,
+    allowEmptyFiles: false,
+    minFileSize: 1,
+  });
+
+  const parsedFiles: any = await new Promise((resolve, reject) => {
+    form.parse(req, (error, _fields, files) => {
+      if (error) return reject(error);
+      resolve(files);
+    });
+  }).catch((error: any) => {
+    const message = error instanceof Error ? error.message : 'Invalid multipart upload';
+    const tooLarge = /maxFileSize|maxTotalFileSize|too large/i.test(message);
+    throw new FileInputError(
+      400,
+      tooLarge ? 'FILE_TOO_LARGE' : 'INVALID_UPLOAD',
+      tooLarge ? `File too large. Max size: ${MAX_FILE_SIZE / 1024 / 1024}MB` : 'Invalid file upload'
+    );
+  });
+
+  const uploaded = Array.isArray(parsedFiles?.file)
+    ? parsedFiles.file[0]
+    : parsedFiles?.file;
+  if (!uploaded?.filepath) {
+    throw new FileInputError(400, 'NO_FILE', 'No file provided');
+  }
+
+  const data = await readFile(uploaded.filepath);
+  return normalizeFile({
+    name: uploaded.originalFilename,
+    size: uploaded.size,
+    mimetype: uploaded.mimetype,
+    data,
+  });
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<AnalysisResult | ApiError>
@@ -72,13 +142,7 @@ export default async function handler(
   try {
     context = await requireAuth(req);
     const { userId, workspaceId, role: userRole } = context;
-    const files = (req as any).files as any;
-    const rawFile = Array.isArray(files?.file) ? files.file[0] : files?.file;
-    if (!rawFile) {
-      return res.status(400).json({ error: 'No file provided', code: 'NO_FILE' });
-    }
-
-    const file = normalizeFile(rawFile);
+    const file = await readIncomingFile(req);
 
     if (!file.data.length) {
       return res.status(400).json({ error: 'File is empty or unreadable', code: 'EMPTY_FILE' });
@@ -163,7 +227,7 @@ export default async function handler(
     if (context && uploadedPath && !analysisStored) {
       await deleteFile(uploadedPath, context).catch(() => console.error('Failed to remove rejected upload'));
     }
-    if (error instanceof AccessError) {
+    if (error instanceof AccessError || error instanceof FileInputError) {
       return res.status(error.status).json({ error: error.message, code: error.code });
     }
     console.error('Analysis error:', error);
@@ -193,8 +257,7 @@ export default async function handler(
 
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: '20mb',
-    },
+    // Multipart must remain a raw stream for Formidable.
+    bodyParser: false,
   },
 };
