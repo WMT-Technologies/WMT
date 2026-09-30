@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { analyzeWithRetry } from '../lib/openai-vision';
+import { analyzeWithRetry, isSupportedAnalysisMimeType } from '../lib/openai-vision';
 import {
   uploadFile,
   deleteFile,
@@ -11,6 +11,51 @@ import { requireAuth, AccessError, type AuthContext } from '../lib/auth';
 import type { AnalysisResult, ApiError } from '../types/analysis';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  csv: 'text/csv',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
+function normalizeMimeType(file: any): string {
+  const supplied = String(file?.mimetype || file?.type || '')
+    .toLowerCase()
+    .split(';', 1)[0]
+    .trim();
+  if (supplied && supplied !== 'application/octet-stream') return supplied;
+
+  const name = String(file?.name || file?.originalFilename || '');
+  const extension = name.toLowerCase().split('.').pop() || '';
+  return MIME_BY_EXTENSION[extension] || supplied;
+}
+
+function normalizeFile(file: any): {
+  data: Buffer;
+  size: number;
+  mimetype: string;
+  name: string;
+} {
+  const data = Buffer.isBuffer(file?.data)
+    ? file.data
+    : file?.data instanceof Uint8Array
+      ? Buffer.from(file.data)
+      : Buffer.alloc(0);
+
+  return {
+    data,
+    size: Number(file?.size ?? data.length ?? 0),
+    mimetype: normalizeMimeType(file),
+    name: String(file?.name || file?.originalFilename || 'document'),
+  };
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -27,26 +72,34 @@ export default async function handler(
   try {
     context = await requireAuth(req);
     const { userId, workspaceId, role: userRole } = context;
-    const files = req.files as any;
-    if (!files || !files.file) {
+    const files = (req as any).files as any;
+    const rawFile = Array.isArray(files?.file) ? files.file[0] : files?.file;
+    if (!rawFile) {
       return res.status(400).json({ error: 'No file provided', code: 'NO_FILE' });
     }
 
-    const file = files.file as any;
+    const file = normalizeFile(rawFile);
 
-    if (file.size > MAX_FILE_SIZE) {
+    if (!file.data.length) {
+      return res.status(400).json({ error: 'File is empty or unreadable', code: 'EMPTY_FILE' });
+    }
+
+    if (file.size > MAX_FILE_SIZE || file.data.length > MAX_FILE_SIZE) {
       return res.status(400).json({
         error: `File too large. Max size: ${MAX_FILE_SIZE / 1024 / 1024}MB`,
         code: 'FILE_TOO_LARGE',
       });
     }
 
-    if (!file.mimetype?.startsWith('image/')) {
-      return res.status(400).json({ error: 'Unsupported file type', code: 'UNSUPPORTED_FILE_TYPE' });
+    if (!isSupportedAnalysisMimeType(file.mimetype)) {
+      return res.status(400).json({
+        error: 'Unsupported file type. Use PDF, Excel, CSV, Word, JPG, PNG, GIF, or WEBP.',
+        code: 'UNSUPPORTED_FILE_TYPE',
+      });
     }
 
     const uploadStart = Date.now();
-    const { path: filePath } = await uploadFile(file, context);
+    const { path: filePath } = await uploadFile(file.data, context, file.mimetype);
     uploadedPath = filePath;
     console.log(`File uploaded in ${Date.now() - uploadStart}ms`);
 
@@ -54,7 +107,8 @@ export default async function handler(
     const analysisResult = await analyzeWithRetry(
       file.data,
       file.mimetype,
-      'finance document'
+      'business document',
+      file.name
     );
 
     const analysisTime = (Date.now() - analysisStart) / 1000;
@@ -70,7 +124,7 @@ export default async function handler(
       extractedData: analysisResult.data,
       suggestedAction: analysisResult.action,
       fileStoragePath: filePath,
-      aiProvider: 'openai_vision',
+      aiProvider: 'openai_responses',
     });
 
     analysisStored = true;
@@ -81,6 +135,7 @@ export default async function handler(
       documentType: analysisResult.type,
       confidence: analysisResult.confidence,
       userRole,
+      fileMimeType: file.mimetype,
     });
 
     const response: AnalysisResult = {
@@ -97,7 +152,7 @@ export default async function handler(
         userId,
         workspaceId,
         analysisTime,
-        aiProvider: 'openai_vision',
+        aiProvider: 'openai_responses',
         fileSize: file.size,
         fileMimeType: file.mimetype,
       },
@@ -121,7 +176,14 @@ export default async function handler(
       }).catch(err => console.error('Failed to log error:', err));
     }
 
-    res.status(500).json({
+    if (errorMessage.includes('OPENAI_API_KEY')) {
+      return res.status(503).json({
+        error: 'AI analysis is not configured',
+        code: 'AI_NOT_CONFIGURED',
+      });
+    }
+
+    res.status(502).json({
       error: 'Analysis failed',
       code: 'ANALYSIS_FAILED',
       details: errorMessage,
