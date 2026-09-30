@@ -94,7 +94,7 @@ export async function analyzeWithVision(
     content.push({
       type: 'input_file',
       filename: safeFilename(filename, normalizedMimeType),
-      file_data: base64,
+      file_data: `data:${normalizedMimeType};base64,${base64}`,
     });
   }
 
