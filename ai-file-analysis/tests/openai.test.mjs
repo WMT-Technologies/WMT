@@ -95,7 +95,7 @@ for (const [label, mimeType, filename] of [
     const content = state.calls[0].input[0].content;
     assert.equal(content[1].type, 'input_file');
     assert.equal(content[1].filename, filename);
-    assert.equal(content[1].file_data, Buffer.from(`${label}-data`).toString('base64'));
+    assert.equal(content[1].file_data, `data:${mimeType};base64,${Buffer.from(`${label}-data`).toString('base64')}`);
   });
 }
 
