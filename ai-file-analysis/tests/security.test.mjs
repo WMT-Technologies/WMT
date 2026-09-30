@@ -89,6 +89,8 @@ async function harness() {
     await mod.link(async (specifier, parent) => {
       if (specifier === '@supabase/supabase-js') return synthetic('supabase', { createClient: () => db });
       if (specifier === 'node:crypto') return synthetic('crypto', { randomUUID });
+      if (specifier === 'node:fs/promises') return synthetic('fs-promises', { readFile: async () => Buffer.from('multipart-fixture') });
+      if (specifier === 'formidable') return synthetic('formidable', { default: () => ({ parse() { throw new Error('Formidable should not run for pre-parsed test uploads'); } }) });
       if (specifier.endsWith('/openai-vision')) return synthetic('ai', { analyzeWithRetry: async () => { state.aiCalls++; return state.aiResult; }, isSupportedAnalysisMimeType: (mime) => ['image/png','image/jpeg','image/gif','image/webp','application/pdf','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','text/csv','application/csv','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mime) });
       return load(resolve(dirname(parent.identifier), specifier + '.ts'));
     });
