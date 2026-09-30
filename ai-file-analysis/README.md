@@ -2,12 +2,12 @@
 
 **Required security integration:** read [AUTH_INTEGRATION.md](AUTH_INTEGRATION.md) before enabling this module. Requests require a verified Supabase session and an approved workspace membership; `x-user-id` is not accepted as authentication.
 
-Simple implementation for file/image analysis using OpenAI Vision API and Supabase without building OCR/recognition from scratch.
+Simple implementation for file/image analysis using OpenAI Responses API and Supabase without building OCR/recognition from scratch.
 
 ## Features
 
 - **Multi-format Support**: Photos, PDFs, Excel, Word, receipts, invoices, employee documents, transaction screenshots
-- **AI-Powered Extraction**: OpenAI Vision API
+- **AI-Powered Extraction**: OpenAI Responses API
 - **Permission-Based Access**: Role-based control (Sales, HR, Finance, Project)
 - **Approval Workflow**: User review before data persistence
 - **Structured Output**: JSON extraction with confidence scores
@@ -25,7 +25,7 @@ Simple implementation for file/image analysis using OpenAI Vision API and Supaba
 
 ## Quick Start
 
-1. Install dependencies: `npm install @supabase/supabase-js @supabase/ssr openai`
+1. Install dependencies: `npm install @supabase/supabase-js @supabase/ssr openai@^7.17.0`
 2. Configure `.env.local`
 3. Run Supabase SQL setup
 4. Copy files to your project
